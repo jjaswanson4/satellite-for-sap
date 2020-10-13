@@ -1,0 +1,42 @@
+---
+
+- name: configure satellite
+  hosts:
+    - satellite
+  collections:
+    - jjaswanson4.configure_satellite
+    - theforeman.foreman
+  pre_tasks:
+    - name: import satellite configuration vars file
+      include_vars:
+        file: vars/satellite/satellite.yml
+      delegate_to: localhost
+  tasks:
+    - name: include configure_foreman role with katello independent pieces
+      include_role:
+        name: jjaswanson4.configure_satellite.configure_foreman
+    - name: build satellite by organization
+      include_role:
+        name: configure_katello
+      loop_control:
+        loop_var: organization
+      loop: "{{ satellite.katello }}"
+    - name: include tasks to create hostgroup after content is available
+      include_role:
+        name: configure_foreman
+      vars:
+        requires_katello_content: true
+    - name: add satellite to new location
+      block:
+        - name: get current capsule locations
+          shell: hammer --csv capsule info --name "{{ inventory_hostname }}" --fields Locations | grep -v ^Locations
+          register: capsule_locations
+          changed_when: false
+          failed_when: false
+          ignore_errors: true
+          check_mode: false
+
+        - name: set capsule locations
+          shell: hammer capsule update --name "{{ inventory_hostname }}" --locations "{{ capsule | json_query('locations[*].name') | list | sort | join(',') }}"
+          changed_when:
+            - capsule | json_query('locations[*].name') | list | sort | join(',') != capsule_locations.stdout
